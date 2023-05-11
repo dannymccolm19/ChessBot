@@ -7,17 +7,153 @@ class Engine:
         self.board=board
         self.color=color
         self.maxDepth=maxDepth
+        self.transposition_table = {}
     
     def getBestMove(self):
-        return self.engine(None, 1)
+        if self.board.turn == self.color:
+            _, best_move = self.engine(float('-inf'), float('inf'), 1, False)
+        else:
+            _, best_move = self.engine(float('-inf'), float('inf'), 1)
+        return best_move
+    
+    def calculateMaterialScore(self):
+        material_score = 0
+        for piece_type in [ch.PAWN, ch.KNIGHT, ch.BISHOP, ch.ROOK, ch.QUEEN]:
+            count = len(self.board.pieces(piece_type, self.color))
+            material_score += count * self.getPieceValue(piece_type)
+        return material_score
 
+    def getPieceValue(self, piece_type):
+        # Assign values to each piece type
+        if piece_type == ch.PAWN:
+            return 1
+        elif piece_type == ch.KNIGHT:
+            return 3
+        elif piece_type == ch.BISHOP:
+            return 3.2
+        elif piece_type == ch.ROOK:
+            return 5.1
+        elif piece_type == ch.QUEEN:
+            return 8.8
+        else:
+            return 0
+        
+    def getPieceSquareValue(self, piece_type, square):
+        # Assign positional values for each piece type and square
+        piece_square_table = {
+            ch.PAWN: [
+                0, 0, 0, 0, 0, 0, 0, 0,
+                5, 5, 5, 5, 5, 5, 5, 5,
+                1, 1, 2, 3, 3, 2, 1, 1,
+                0.5, 0.5, 1, 2.5, 2.5, 1, 0.5, 0.5,
+                0, 0, 0, 2, 2, 0, 0, 0,
+                0.5, -0.5, -1, 0, 0, -1, -0.5, 0.5,
+                0.5, 1, 1, -2, -2, 1, 1, 0.5,
+                0, 0, 0, 0, 0, 0, 0, 0
+            ],
+            ch.KNIGHT: [
+                -5, -4, -3, -3, -3, -3, -4, -5,
+                -4, -2, 0, 0, 0, 0, -2, -4,
+                -3, 0, 1, 1.5, 1.5, 1, 0, -3,
+                -3, 0.5, 1.5, 2, 2, 1.5, 0.5, -3,
+                -3, 0.5, 1.5, 2, 2, 1.5, 0.5, -3,
+                -3, 0, 1, 1.5, 1.5, 1, 0, -3,
+                -4, -2, 0, 0.5, 0.5, 0, -2, -4,
+                -5, -4, -3, -3, -3, -3, -4, -5
+            ],
+            ch.BISHOP: [
+                -2, -1, -1, -1, -1, -1, -1, -2,
+                -1, 0, 0, 0, 0, 0, 0, -1,
+                -1, 0, 0.5, 1, 1, 0.5, 0, -1,
+                -1, 0.5, 0.5, 1, 1, 0.5, 0.5, -1,
+                -1, 0, 1, 1, 1, 1, 0, -1,
+                -1, 1, 1, 1, 1, 1, 1, -1,
+                -1, 0.5, 0, 0, 0, 0, 0.5, -1,
+                -2, -1, -1, -1, -1, -1, -1, -2
+            ],
+            ch.ROOK: [
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0.5, 1, 1, 1, 1, 1, 1, 0.5,
+                -0.5, 0, 0, 0, 0, 0, 0, -0.5,
+                -0.5, 0, 0, 0, 0, 0, 0, -0.5,
+                -0.5, 0, 0, 0, 0, 0, 0, -0.5,
+                -0.5, 0, 0, 0, 0, 0, 0, -0.5,
+                -0.5, 0, 0, 0, 0, 0, 0, -0.5,
+                0, 0, 0, 0.5, 0.5, 0, 0, 0
+            ],
+            ch.QUEEN: [
+                -2, -1, -1, -0.5, -0.5, -1, -1, -2,
+                -1, 0, 0, 0, 0, 0, 0, -1,
+                -1, 0, 0.5, 0.5, 0.5, 0.5, 0, -1,
+                -0.5, 0, 0.5, 0.5, 0.5, 0.5, 0, -0.5,
+                0, 0, 0.5, 0.5, 0.5, 0.5, 0, -0.5,
+                -1, 0.5, 0.5, 0.5, 0.5, 0.5, 0, -1,
+                -1, 0, 0.5, 0, 0, 0, 0, -1,
+                -2, -1, -1, -0.5, -0.5, -1, -1, -2
+            ]
+        }
+
+        if piece_type in piece_square_table:
+            if self.color == ch.WHITE:
+                # White's perspective
+                return piece_square_table[piece_type][square]
+            else:
+                # Black's perspective
+                return piece_square_table[piece_type][ch.square_mirror(square)]
+        else:
+            return 0
+
+        
+    def calculatePositionalScore(self):
+        positional_score = 0
+        for square, piece in self.board.piece_map().items():
+            if piece.color == self.color:
+                piece_value = self.getPieceValue(piece.piece_type)
+                positional_score += piece_value + self.getPieceSquareValue(piece.piece_type, square)
+            else:
+                piece_value = self.getPieceValue(piece.piece_type)
+                positional_score -= piece_value + self.getPieceSquareValue(piece.piece_type, square)
+        return positional_score
+    
+    def calculateKingSafetyScore(self):
+        king_safety_score = 0
+
+        # Check if the king is under attack
+        if self.board.is_check():
+            king_safety_score -= 5
+
+        # Add more king safety evaluation logic here
+
+        return king_safety_score
+
+
+    def calculatePawnStructureScore(self):
+        pawn_structure_score = 0
+        pawns = self.board.pieces(ch.PAWN, self.color)
+        for pawn in pawns:
+            if not self.isIsolatedPawn(pawn):
+                pawn_structure_score -= 10
+        return pawn_structure_score
+    
+    def isIsolatedPawn(self, square):
+        file = square % 8
+        adjacent_files = [file - 1, file + 1]
+        for adj_file in adjacent_files:
+            if 0 <= adj_file <= 7 and self.board.piece_at(adj_file + square // 8 * 8) == ch.PAWN:
+                return False
+        return True
+
+    
     def evalFunct(self):
-        compt = 0
-        #Sums up the material values
-        for i in self.board.piece_map():
-            compt+=self.squareResPoints(ch.SQUARES[i])
-        compt += self.mateOpportunity() + self.openning() + 0.001*rd.random()
-        return compt
+        material_score = self.calculateMaterialScore()
+        positional_score = self.calculatePositionalScore()
+        king_safety_score = self.calculateKingSafetyScore()
+        pawn_structure_score = self.calculatePawnStructureScore()
+
+        total_score = material_score + positional_score + king_safety_score + pawn_structure_score
+
+        return total_score
+        
 
     def mateOpportunity(self):
         if (self.board.legal_moves.count()==0):
@@ -28,8 +164,8 @@ class Engine:
         else:
             return 0
 
-    #to make the engine developp in the first moves
-    def openning(self):
+    
+    def opening(self):
         if (self.board.fullmove_number<10):
             if (self.board.turn == self.color):
                 return 1/30 * self.board.legal_moves.count()
@@ -59,105 +195,53 @@ class Engine:
         else:
             return pieceValue
 
+    def move_heuristic(self, move):
+        captured_piece_value = 0
+        if self.board.is_capture(move):
+            captured_piece_value = self.squareResPoints(move.to_square)
+        return captured_piece_value
         
-    def engine(self, candidate, depth):
         
-        #reached max depth of search or no possible moves
-        if ( depth == self.maxDepth
-        or self.board.legal_moves.count() == 0):
-            return self.evalFunct()
         
-        else:
-            #get list of legal moves of the current position
-            #moveListe = list(self.board.legal_moves)
-            
-            #initialise newCandidate
-            newCandidate = None
-            #(uneven depth means engine's turn)
-            if(depth % 2 != 0):
-                newCandidate = float("-inf")
-            else:
-                newCandidate = float("inf")
-            
-            #analyse board after deeper moves
-            for i in self.board.legal_moves:
+        
+    def engine(self, alpha, beta, depth, is_human_turn=True):
+        key = self.board.board_fen()
+        if key in self.transposition_table:
+            return self.transposition_table[key]
 
-                #Play move i
-                self.board.push(i)
+        if depth == self.maxDepth or self.board.is_game_over():
+            return self.evalFunct(), None
 
-                #Get value of move i (by exploring the repercussions)
-                value = self.engine(newCandidate, depth + 1) 
+        best_move = None
 
-                #Basic minmax algorithm:
-                #if maximizing (engine's turn)
-                if(value > newCandidate and depth % 2 != 0):
-                    #need to save move played by the engine
-                    if (depth == 1):
-                        move=i
-                    newCandidate = value
-                #if minimizing (human player's turn)
-                elif(value < newCandidate and depth % 2 == 0):
-                    newCandidate = value
-
-                #Alpha-beta prunning cuts: 
-                #(if previous move was made by the engine)
-                if (candidate != None
-                 and value < candidate
-                 and depth % 2 == 0):
-                    self.board.pop()
-                    break
-                #(if previous move was made by the human player)
-                elif (candidate != None 
-                and value > candidate 
-                and depth % 2 != 0):
-                    self.board.pop()
-                    break
-                
-                #Undo last move
+        if is_human_turn:
+            best_value = float('inf')
+            for move in self.board.legal_moves:
+                self.board.push(move)
+                value, _ = self.engine(alpha, beta, depth + 1, not is_human_turn)
                 self.board.pop()
+                if value < best_value:
+                    best_value = value
+                    best_move = move
+                beta = min(beta, value)
+                if beta <= alpha:
+                    break
+        else:
+            best_value = float('-inf')
+            for move in self.board.legal_moves:
+                self.board.push(move)
+                value, _ = self.engine(alpha, beta, depth + 1, not is_human_turn)
+                self.board.pop()
+                if value > best_value:
+                    best_value = value
+                    best_move = move
+                alpha = max(alpha, value)
+                if beta <= alpha:
+                    break
 
-            #Return result
-            if (depth>1):
-                #eturn value of a move in the tree
-                return newCandidate
-            else:
-                #return the move (only on first move)
-                return move
+        self.transposition_table[key] = (best_value, best_move)
 
-
-
-  
-
-
-
-            
-            
-
-
-        
-
-
-        
-
-
-
-            
-
-
-
-
-
-
-        
-        
-
-
-
-
-        
-
-
-
-
-    
-    
+        if depth == 1:
+            return best_value, best_move
+        else:
+            return best_value, None
