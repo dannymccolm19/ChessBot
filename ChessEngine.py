@@ -9,6 +9,7 @@ class Engine:
         self.maxDepth=maxDepth
         self.transposition_table = {}
     
+    
     def getBestMove(self):
         if self.board.turn == self.color:
             _, best_move = self.engine(float('-inf'), float('inf'), 1, False)
@@ -16,6 +17,7 @@ class Engine:
             _, best_move = self.engine(float('-inf'), float('inf'), 1)
         return best_move
     
+    #Calculates total material score
     def calculateMaterialScore(self):
         material_score = 0
         for piece_type in [ch.PAWN, ch.KNIGHT, ch.BISHOP, ch.ROOK, ch.QUEEN]:
@@ -23,8 +25,8 @@ class Engine:
             material_score += count * self.getPieceValue(piece_type)
         return material_score
 
+    #Returns value of each piece
     def getPieceValue(self, piece_type):
-        # Assign values to each piece type
         if piece_type == ch.PAWN:
             return 1
         elif piece_type == ch.KNIGHT:
@@ -38,8 +40,8 @@ class Engine:
         else:
             return 0
         
+    #Gets value of piece being on given square    
     def getPieceSquareValue(self, piece_type, square):
-        # Assign positional values for each piece type and square
         piece_square_table = {
             ch.PAWN: [
                 0, 0, 0, 0, 0, 0, 0, 0,
@@ -95,15 +97,13 @@ class Engine:
 
         if piece_type in piece_square_table:
             if self.color == ch.WHITE:
-                # White's perspective
                 return piece_square_table[piece_type][square]
             else:
-                # Black's perspective
                 return piece_square_table[piece_type][ch.square_mirror(square)]
         else:
             return 0
 
-        
+    #Calculates positional score    
     def calculatePositionalScore(self):
         positional_score = 0
         for square, piece in self.board.piece_map().items():
@@ -115,6 +115,7 @@ class Engine:
                 positional_score -= piece_value + self.getPieceSquareValue(piece.piece_type, square)
         return positional_score
     
+    #Calculates the safety of the king
     def calculateKingSafetyScore(self):
         king_safety_score = 0
 
@@ -122,11 +123,9 @@ class Engine:
         if self.board.is_check():
             king_safety_score -= 5
 
-        # Add more king safety evaluation logic here
-
         return king_safety_score
 
-
+    #Calculates how good pawn structure is
     def calculatePawnStructureScore(self):
         pawn_structure_score = 0
         pawns = self.board.pieces(ch.PAWN, self.color)
@@ -135,6 +134,7 @@ class Engine:
                 pawn_structure_score -= 10
         return pawn_structure_score
     
+    #Checks if a pawn is isolated
     def isIsolatedPawn(self, square):
         file = square % 8
         adjacent_files = [file - 1, file + 1]
@@ -143,18 +143,19 @@ class Engine:
                 return False
         return True
 
-    
+    #Evaluation Function to calculate how good a position is.
+    #Combines and weighs material, positional, king safety, and pawn structure score
     def evalFunct(self):
         material_score = self.calculateMaterialScore()
         positional_score = self.calculatePositionalScore()
         king_safety_score = self.calculateKingSafetyScore()
         pawn_structure_score = self.calculatePawnStructureScore()
 
-        total_score = material_score + positional_score + king_safety_score + pawn_structure_score
+        total_score = material_score + positional_score*0.8 + king_safety_score*0.5 + pawn_structure_score*0.3
 
         return total_score
         
-
+    #Checks if there is a mating opurtunity for either player
     def mateOpportunity(self):
         if (self.board.legal_moves.count()==0):
             if (self.board.turn == self.color):
@@ -164,19 +165,35 @@ class Engine:
         else:
             return 0
 
-    
+    #Opening function to make the first 10 moves easier
     def opening(self):
-        if (self.board.fullmove_number<10):
-            if (self.board.turn == self.color):
-                return 1/30 * self.board.legal_moves.count()
+        if self.board.fullmove_number < 10:
+            if self.board.turn == self.color:
+                move_count = self.board.legal_moves.count()
+
+                # Prioritize moves that develop the pieces
+                piece_moves = [move for move in self.board.legal_moves if self.board.piece_type_at(move.from_square) != ch.PAWN]
+                if piece_moves:
+                    return 1/30 * len(piece_moves) / move_count
+
+                # Prioritize moves that control the center
+                center_squares = [ch.E4, ch.D4, ch.E5, ch.D5]
+                center_moves = [move for move in self.board.legal_moves if move.to_square in center_squares]
+                if center_moves:
+                    return 1/30 * len(center_moves) / move_count
+
+                # Prioritize castling early
+                castling_moves = [move for move in self.board.legal_moves if self.board.is_castling(move)]
+                if castling_moves:
+                    return 1/30 * len(castling_moves) / move_count
+
             else:
                 return -1/30 * self.board.legal_moves.count()
-        else:
-            return 0
 
-    #Takes a square as input and 
-    #returns the corresponding Hans Berliner's
-    #system value of it's resident
+        return 0
+
+
+    
     def squareResPoints(self, square):
         pieceValue = 0
         if(self.board.piece_type_at(square) == ch.PAWN):
@@ -195,12 +212,12 @@ class Engine:
         else:
             return pieceValue
 
+
     def move_heuristic(self, move):
         captured_piece_value = 0
         if self.board.is_capture(move):
             captured_piece_value = self.squareResPoints(move.to_square)
         return captured_piece_value
-        
         
         
         
@@ -213,10 +230,14 @@ class Engine:
             return self.evalFunct(), None
 
         best_move = None
+        
+        moves = list(self.board.legal_moves)
+        moves.sort(key=lambda move: self.move_heuristic(move), reverse=is_human_turn)
+
 
         if is_human_turn:
             best_value = float('inf')
-            for move in self.board.legal_moves:
+            for move in moves:
                 self.board.push(move)
                 value, _ = self.engine(alpha, beta, depth + 1, not is_human_turn)
                 self.board.pop()
@@ -228,7 +249,7 @@ class Engine:
                     break
         else:
             best_value = float('-inf')
-            for move in self.board.legal_moves:
+            for move in moves:
                 self.board.push(move)
                 value, _ = self.engine(alpha, beta, depth + 1, not is_human_turn)
                 self.board.pop()
